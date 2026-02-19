@@ -3,6 +3,7 @@ import {
   scanUrl,
   getUrlHistory,
   getUrlStats,
+  getUrlAnalytics,
   deleteUrlScan,
 } from "../services/api";
 import { fmtDate, sevColor, sevBg } from "../utils/formatters";
@@ -23,29 +24,26 @@ export default function UrlScanner() {
   const [historyPg, setHistoryPg] = useState({});
   const [activeTab, setActiveTab] = useState("scan");
   const [downloading, setDownloading] = useState(null);
+  const [analyticsData, setAnalyticsData] = useState({
+    countries: [],
+    topLinks: [],
+  });
 
   // ============================================================
-  // MOCK DATA (Analytics)
+  // LIVE ANALYTICS (from recent scans)
   // ============================================================
-  const analyticsData = {
-    countries: [
-      { code: "US", flag: "🇺🇸", name: "United States", count: 1250, percent: 45 },
-      { code: "IN", flag: "🇮🇳", name: "India", count: 620, percent: 22 },
-      { code: "GB", flag: "🇬🇧", name: "United Kingdom", count: 340, percent: 12 },
-      { code: "DE", flag: "🇩🇪", name: "Germany", count: 210, percent: 8 },
-      { code: "BR", flag: "🇧🇷", name: "Brazil", count: 150, percent: 5 },
-      { code: "JP", flag: "🇯🇵", name: "Japan", count: 110, percent: 4 },
-      { code: "FR", flag: "🇫🇷", name: "France", count: 90, percent: 3 },
-    ],
-    topLinks: [
-      { url: "google.com", hits: 1540 },
-      { url: "github.com", hits: 1200 },
-      { url: "suspicious-bank-login.tk", hits: 450, risk: "high" },
-      { url: "free-crypto-giveaway.xyz", hits: 320, risk: "critical" },
-      { url: "myshopify.com", hits: 210 },
-      { url: "paypal-secure-check.com", hits: 180, risk: "medium" },
-    ],
-  };
+  const loadAnalytics = useCallback(async () => {
+    try {
+      const { data } = await getUrlAnalytics({ limit: 2000 });
+      setAnalyticsData({
+        countries: data.countries || [],
+        topLinks: data.topLinks || [],
+      });
+    } catch (e) {
+      console.error(e);
+      setAnalyticsData({ countries: [], topLinks: [] });
+    }
+  }, []);
 
   // ============================================================
   // DATA LOADERS
@@ -72,7 +70,16 @@ export default function UrlScanner() {
   useEffect(() => {
     loadHistory();
     loadStats();
-  }, [loadHistory, loadStats]);
+    loadAnalytics();
+
+    const iv = setInterval(() => {
+      loadStats();
+      if (activeTab === "analytics") loadAnalytics();
+      if (activeTab === "history") loadHistory();
+    }, 5000);
+
+    return () => clearInterval(iv);
+  }, [activeTab, loadHistory, loadStats, loadAnalytics]);
 
   // ============================================================
   // HANDLE SCAN
@@ -90,6 +97,7 @@ export default function UrlScanner() {
       setResult(data);
       loadHistory();
       loadStats();
+      loadAnalytics();
     } catch (e) {
       setError(e.response?.data?.error || e.message || "Scan failed");
     }
@@ -127,6 +135,7 @@ export default function UrlScanner() {
       await deleteUrlScan(id);
       setHistory((h) => h.filter((s) => s._id !== id));
       loadStats();
+      loadAnalytics();
     } catch (e) {
       console.error(e);
     }
@@ -1379,56 +1388,71 @@ export default function UrlScanner() {
         <div className="us-an-grid anim-up">
           <div className="card">
             <div className="card-hdr">
-              <span className="card-title">🌍 Traffic Distribution by Country</span>
+              <span className="card-title">GeoIP Traffic Distribution by Country</span>
             </div>
+            <p style={{ margin: "0 0 10px", color: "var(--muted)", fontSize: "0.8rem" }}>
+              Country is resolved from destination IP (GeoIP). Older scans may fall back to TLD.
+            </p>
             <div className="us-an-list">
-              {analyticsData.countries.map((c) => (
-                <div key={c.code} className="us-an-row">
-                  <div className="us-an-label">
-                    <span className="us-an-flag">{c.flag}</span>
-                    <span className="us-an-name">{c.name}</span>
+              {analyticsData.countries.length ? (
+                analyticsData.countries.map((c) => (
+                  <div key={c.code} className="us-an-row">
+                    <div className="us-an-label">
+                      <span className="us-an-flag">{c.flag}</span>
+                      <span className="us-an-name">{c.name}</span>
+                    </div>
+                    <div className="us-an-bar-track">
+                      <div
+                        className="us-an-bar-fill"
+                        style={{
+                          width: `${c.percent}%`,
+                          background: getBarColor(c.percent),
+                        }}
+                      />
+                    </div>
+                    <div className="us-an-val">{c.percent}%</div>
                   </div>
-                  <div className="us-an-bar-track">
-                    <div
-                      className="us-an-bar-fill"
-                      style={{
-                        width: `${c.percent}%`,
-                        background: getBarColor(c.percent),
-                      }}
-                    />
-                  </div>
-                  <div className="us-an-val">{c.percent}%</div>
+                ))
+              ) : (
+                <div className="empty">
+                  <p>No analytics data yet. Run a few URL scans.</p>
                 </div>
-              ))}
+              )}
             </div>
           </div>
           <div className="card">
             <div className="card-hdr">
-              <span className="card-title">🔗 Most Frequently Accessed Links</span>
+              <span className="card-title">?? Most Frequently Accessed Links</span>
             </div>
             <div className="us-an-list">
-              {analyticsData.topLinks.map((l, i) => (
-                <div key={i} className="us-an-link-row">
-                  <div className="us-an-link-info">
-                    <div className="us-an-link-url">{l.url}</div>
-                    {l.risk && (
-                      <span
-                        className="badge"
-                        style={{
-                          background: sevBg(l.risk),
-                          color: sevColor(l.risk),
-                          fontSize: "0.65rem",
-                        }}
-                      >
-                        {l.risk.toUpperCase()}
-                      </span>
-                    )}
+              {analyticsData.topLinks.length ? (
+                analyticsData.topLinks.map((l, i) => (
+                  <div key={i} className="us-an-link-row">
+                    <div className="us-an-link-info">
+                      <div className="us-an-link-url">{l.url}</div>
+                      {l.risk && (
+                        <span
+                          className="badge"
+                          style={{
+                            background: sevBg(l.risk),
+                            color: sevColor(l.risk),
+                            fontSize: "0.65rem",
+                          }}
+                        >
+                          {l.risk.toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="us-an-link-hits">
+                      {l.hits.toLocaleString()} hits
+                    </div>
                   </div>
-                  <div className="us-an-link-hits">
-                    {l.hits.toLocaleString()} hits
-                  </div>
+                ))
+              ) : (
+                <div className="empty">
+                  <p>No link activity yet.</p>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>

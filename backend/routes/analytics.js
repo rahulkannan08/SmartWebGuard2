@@ -44,19 +44,57 @@ router.get("/attack-timeline", async (req, res, next) => {
     const { period = "24h" } = req.query;
     const ms = { "1h": 36e5, "24h": 864e5, "7d": 6048e5, "30d": 2592e6 };
     const fmt = { "1h": "%H:%M", "24h": "%H:00", "7d": "%m-%d", "30d": "%m-%d" };
-    const since = new Date(Date.now() - (ms[period] || 864e5));
+    const windowMs = ms[period] || 864e5;
+    let end = new Date();
+    let since = new Date(end.getTime() - windowMs);
+
+    // If there are no recent alerts in the requested window, anchor on latest alert
+    // so timeline still visualizes existing data instead of a flat zero chart.
+    const hasRecent = await Alert.exists({ timestamp: { $gte: since } });
+    if (!hasRecent) {
+      const latest = await Alert.findOne().sort({ timestamp: -1 }).select("timestamp").lean();
+      if (latest?.timestamp) {
+        end = new Date(latest.timestamp);
+        since = new Date(end.getTime() - windowMs);
+      }
+    }
 
     const data = await Alert.aggregate([
-      { $match: { timestamp: { $gte: since } } },
+      { $match: { timestamp: { $gte: since, $lte: end } } },
       { $group: { _id: { t: { $dateToString: { format: fmt[period] || "%H:00", date: "$timestamp" } }, type: "$attackType" }, count: { $sum: 1 } } },
       { $sort: { "_id.t": 1 } },
     ]);
 
+    const pad2 = (n) => String(n).padStart(2, "0");
+    const toLabel = (d) => {
+      if (period === "1h") return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      if (period === "24h") return `${pad2(d.getHours())}:00`;
+      return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    };
+
+    const stepMs =
+      period === "1h" ? 60e3 :
+      period === "24h" ? 36e5 :
+      864e5;
+
+    const types = ["dos", "probe", "r2l", "u2r"];
     const map = {};
+    for (let t = since.getTime(); t <= end.getTime(); t += stepMs) {
+      const label = toLabel(new Date(t));
+      if (!map[label]) {
+        map[label] = { time: label };
+        types.forEach((k) => { map[label][k] = 0; });
+      }
+    }
+
     data.forEach(({ _id, count }) => {
-      if (!map[_id.t]) map[_id.t] = { time: _id.t };
+      if (!map[_id.t]) {
+        map[_id.t] = { time: _id.t };
+        types.forEach((k) => { map[_id.t][k] = 0; });
+      }
       map[_id.t][_id.type] = count;
     });
+
     res.json(Object.values(map));
   } catch (err) { next(err); }
 });

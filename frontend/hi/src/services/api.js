@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API = process.env.REACT_APP_API_URL || "http://localhost:4000/api";
+const API = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 const api = axios.create({ baseURL: API, timeout: 30000 });
 
 export const getDashboard = () => api.get("/analytics/dashboard");
@@ -28,6 +28,8 @@ export const batchScanUrls = (urls, deep = false) =>
 export const getUrlHistory = (params) =>
   api.get("/url/history", { params });
 export const getUrlStats = () => api.get("/url/stats");
+export const getUrlAnalytics = (params) =>
+  api.get("/url/analytics", { params });
 export const getUrlScan = (id) => api.get(`/url/${id}`);
 export const deleteUrlScan = (id) => api.delete(`/url/${id}`);
 

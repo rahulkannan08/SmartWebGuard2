@@ -13,7 +13,7 @@ export function SocketProvider({ children }) {
   const ref = useRef(null);
 
   useEffect(() => {
-    const sock = io(process.env.REACT_APP_SOCKET_URL || "http://localhost:4000", {
+    const sock = io(import.meta.env.VITE_SOCKET_URL || "http://localhost:4000", {
       transports: ["websocket", "polling"], reconnection: true,
       reconnectionDelay: 1000, reconnectionAttempts: Infinity,
     });
